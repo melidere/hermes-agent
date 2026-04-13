@@ -1793,7 +1793,8 @@ class AIAgent:
 
                 if actions:
                     summary = " · ".join(dict.fromkeys(actions))
-                    self._safe_print(f"  💾 {summary}")
+                    if not self.quiet_mode:
+                        self._safe_print(f"  💾 {summary}")
                     _bg_cb = self.background_review_callback
                     if _bg_cb:
                         try:

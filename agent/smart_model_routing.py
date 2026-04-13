@@ -47,6 +47,12 @@ _COMPLEX_KEYWORDS = {
 
 _URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 
+# Matches messages that are primarily reminder/scheduling requests.
+_REMINDER_RE = re.compile(
+    r"\b(remind\s+me|reminder|set\s+a\s+reminder|schedule\s+a\s+reminder|don'?t\s+let\s+me\s+forget)\b",
+    re.IGNORECASE,
+)
+
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     return is_truthy_value(value, default=default)
@@ -107,12 +113,45 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
     return route
 
 
+def choose_reminder_model_route(user_message: str, routing_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return the configured reminder-model route when a message looks like a reminder request.
+
+    Triggered by keywords like 'remind me', 'reminder', 'set a reminder', etc.
+    Configured via smart_model_routing.reminder_model in config.yaml.
+    Falls back to None (primary model) if not configured or no match.
+    """
+    cfg = routing_config or {}
+    reminder_model = cfg.get("reminder_model") or {}
+    if not isinstance(reminder_model, dict):
+        return None
+    provider = str(reminder_model.get("provider") or "").strip().lower()
+    model = str(reminder_model.get("model") or "").strip()
+    if not provider or not model:
+        return None
+
+    text = (user_message or "").strip()
+    if not text:
+        return None
+
+    if not _REMINDER_RE.search(text):
+        return None
+
+    route = dict(reminder_model)
+    route["provider"] = provider
+    route["model"] = model
+    route["routing_reason"] = "reminder_turn"
+    return route
+
+
 def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any]], primary: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve the effective model/runtime for one turn.
 
     Returns a dict with model/runtime/signature/label fields.
+    Reminder routing takes priority over cheap-model routing.
     """
-    route = choose_cheap_model_route(user_message, routing_config)
+    route = choose_reminder_model_route(user_message, routing_config)
+    if not route:
+        route = choose_cheap_model_route(user_message, routing_config)
     if not route:
         return {
             "model": primary.get("model"),
@@ -182,7 +221,7 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
             "command": runtime.get("command"),
             "args": list(runtime.get("args") or []),
         },
-        "label": f"smart route → {route.get('model')} ({runtime.get('provider')})",
+        "label": f"smart route [{route.get('routing_reason', 'simple_turn')}] → {route.get('model')} ({runtime.get('provider')})",
         "signature": (
             route.get("model"),
             runtime.get("provider"),
