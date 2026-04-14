@@ -6705,8 +6705,27 @@ class GatewayRunner:
             agent.reasoning_config = reasoning_config
 
             # Background review delivery — send "💾 Memory updated" etc. to user
-            # mel: suppressed — review runs silently without notifying the user
-            agent.background_review_callback = None
+            # Gated on memory.review_notify (default: true). Set to false to
+            # run the review silently without delivering summaries to the user.
+            _review_notify = user_config.get("memory", {}).get("review_notify", True)
+            if _review_notify:
+                def _bg_review_send(message: str) -> None:
+                    if not _status_adapter:
+                        return
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            _status_adapter.send(
+                                _status_chat_id,
+                                message,
+                                metadata=_status_thread_metadata,
+                            ),
+                            _loop_for_step,
+                        )
+                    except Exception as _e:
+                        logger.debug("background_review_callback error: %s", _e)
+                agent.background_review_callback = _bg_review_send
+            else:
+                agent.background_review_callback = None
 
             # Store agent reference for interrupt support
             agent_holder[0] = agent
